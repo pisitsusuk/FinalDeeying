@@ -1,3 +1,14 @@
-node_modules
-# Keep environment variables out of version control
-# .env
+# env & keys
+.env
+*.pem
+*.p12
+*.key
+*.crt
+ChatBot/*.json
+
+# node
+node_modules/
+coverage/
+dist/
+build/
+uploads/
