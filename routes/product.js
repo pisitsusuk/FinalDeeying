@@ -12,7 +12,7 @@ const { create,
     removeImage
 } = require('../controllers/product')
 const { authCheck, adminCheck } = require('../middlewares/authCheck')
-// @ENDPOINT http://localhost:5001/api/product
+// @ENDPOINT https://deeyingsystem.onrender.com/api/product
 router.post('/product', create)
 router.get('/products/:count', list)
 router.get('/product/:id', read)
