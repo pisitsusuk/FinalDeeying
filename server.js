@@ -26,16 +26,18 @@ const adminBankInfoRoutes = require("./routes/adminBankInfo");
 const addressRoutes = require("./routes/address"); // ที่อยู่จัดส่ง
 const productRoutes = require("./routes/product");
 // ===== CORS =====
-const ALLOW_ORIGINS = ["http://localhost:5173"];
+const ALLOW_ORIGINS = ["https://frontenddeeying.onrender.com"];
 app.use(
   cors({
     origin(origin, cb) {
-      if (!origin || ALLOW_ORIGINS.includes(origin)) return cb(null, true);
+      if (!origin || ALLOW_ORIGINS.includes(origin)) {
+        return cb(null, true);
+      }
       return cb(new Error("Not allowed by CORS"));
     },
     credentials: true,
-    methods: "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    allowedHeaders: "Content-Type, Authorization",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     optionsSuccessStatus: 200,
   })
 );
