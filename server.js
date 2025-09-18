@@ -26,7 +26,7 @@ const adminBankInfoRoutes = require("./routes/adminBankInfo");
 const addressRoutes = require("./routes/address"); // ที่อยู่จัดส่ง
 const productRoutes = require("./routes/product");
 // ===== CORS =====
-const ALLOW_ORIGINS = ["https://frontenddeeying.onrender.com"];
+const ALLOW_ORIGINS = ["https://deeying-system.onrender.com"];
 app.use(
   cors({
     origin(origin, cb) {
