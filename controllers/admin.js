@@ -175,14 +175,14 @@ exports.listSlips = async (req, res) => {
 };
 
 
-// ✅ ลบผู้ใช้แบบถาวร (hard delete) — เคลียร์ความสัมพันธ์ก่อนแล้วค่อยลบผู้ใช้
+// ✅ ลบผู้ใช้แบบถาวร (hard delete) — ลบความสัมพันธ์ก่อน แล้วค่อยลบ user
 exports.deleteUser = async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ ok: false, message: "invalid id" });
 
   try {
     await prisma.$transaction(async (tx) => {
-      // ----- 1) ลบตะกร้า + รายการสินค้าในตะกร้า + cart_addresses -----
+      // ----- 1) ลบตะกร้า + รายการในตะกร้า + cart_addresses -----
       const carts = await tx.cart.findMany({
         where: { orderedById: id },
         select: { id: true },
@@ -190,22 +190,17 @@ exports.deleteUser = async (req, res) => {
       const cartIds = carts.map((c) => c.id);
 
       if (cartIds.length) {
-        // ลบสินค้าในตะกร้า
         await tx.productOnCart.deleteMany({ where: { cartId: { in: cartIds } } });
 
-        // ลบ cart_addresses (ตารางนี้ไม่ได้อยู่ใน Prisma schema ใช้ raw SQL)
+        // cart_addresses ไม่อยู่ใน Prisma schema → ใช้ raw
         for (const cid of cartIds) {
-          await tx.$executeRawUnsafe(
-            `DELETE FROM cart_addresses WHERE "cartId" = ?`,
-            cid
-          );
+          await tx.$executeRaw`DELETE FROM cart_addresses WHERE "cartId" = ${cid}`;
         }
 
-        // ลบตะกร้า
         await tx.cart.deleteMany({ where: { id: { in: cartIds } } });
       }
 
-      // ----- 2) ลบคำสั่งซื้อ + รายการสินค้าในคำสั่งซื้อ -----
+      // ----- 2) ลบออเดอร์ + รายการในออเดอร์ -----
       const orders = await tx.order.findMany({
         where: { orderedById: id },
         select: { id: true },
@@ -218,24 +213,15 @@ exports.deleteUser = async (req, res) => {
       }
 
       // ----- 3) ลบสลิปโอน + รายการสินค้าในสลิป -----
-      const slips = await tx.$queryRawUnsafe(
-        `SELECT id FROM payment_slips WHERE user_id = ?`,
-        id
-      );
+      const slips = await tx.$queryRaw`SELECT id FROM payment_slips WHERE user_id = ${id}`;
       const slipIds = (slips || []).map((s) => s.id);
 
       for (const sid of slipIds) {
-        await tx.$executeRawUnsafe(
-          `DELETE FROM payment_slip_items WHERE slip_id = ?`,
-          sid
-        );
-        await tx.$executeRawUnsafe(
-          `DELETE FROM payment_slips WHERE id = ?`,
-          sid
-        );
+        await tx.$executeRaw`DELETE FROM payment_slip_items WHERE slip_id = ${sid}`;
+        await tx.$executeRaw`DELETE FROM payment_slips WHERE id = ${sid}`;
       }
 
-      // ----- 4) ลบผู้ใช้ -----
+      // ----- 4) ลบผู้ใช้จริง -----
       await tx.user.delete({ where: { id } });
     });
 
@@ -244,7 +230,8 @@ exports.deleteUser = async (req, res) => {
     console.error("hard deleteUser error:", err);
     return res
       .status(500)
-      .json({ ok: false, message: "Server error", detail: String(err?.message || err) });
+      .json({ ok: false, message: "Server error", detail: String(err?.meta?.message || err?.message || err) });
   }
 };
+
 
