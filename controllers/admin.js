@@ -175,7 +175,7 @@ exports.listSlips = async (req, res) => {
 };
 
 
-// ✅ ลบผู้ใช้ (พยายามลบจริง ถ้าติด FK จะ soft-delete แทน)
+// ✅ ลบผู้ใช้ (ลบจริง ถ้าติด FK จะ soft-delete)
 exports.deleteUser = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -184,7 +184,7 @@ exports.deleteUser = async (req, res) => {
     try {
       // ลบจริง
       await prisma.user.delete({ where: { id } });
-      return res.json({ ok: true, deletedId: id, message: "User deleted" });
+      return res.json({ ok: true, hardDeleted: true, deletedId: id, message: "User deleted" });
     } catch (err) {
       // ถ้าติด Foreign Key constraint → ทำ soft-delete แทน
       const isFK =
@@ -195,9 +195,9 @@ exports.deleteUser = async (req, res) => {
       const user = await prisma.user.update({
         where: { id },
         data: {
-          enabled: 0,
+          enabled: false,      // <-- แก้จาก 0 เป็น Boolean
           role: "user",
-          email: anonEmail, // anonymize เพื่อไม่ชน unique
+          email: anonEmail,    // anonymize กันชน unique
         },
         select: { id: true, email: true, role: true, enabled: true },
       });
@@ -214,3 +214,4 @@ exports.deleteUser = async (req, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
+
