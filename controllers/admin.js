@@ -173,3 +173,44 @@ exports.listSlips = async (req, res) => {
     res.status(500).json({ ok: false, message: "ไม่สามารถดึงรายการสลิปได้" });
   }
 };
+
+
+// ✅ ลบผู้ใช้ (พยายามลบจริง ถ้าติด FK จะ soft-delete แทน)
+exports.deleteUser = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ ok: false, message: "invalid id" });
+
+    try {
+      // ลบจริง
+      await prisma.user.delete({ where: { id } });
+      return res.json({ ok: true, deletedId: id, message: "User deleted" });
+    } catch (err) {
+      // ถ้าติด Foreign Key constraint → ทำ soft-delete แทน
+      const isFK =
+        err?.code === "P2003" || /foreign key|constraint/i.test(String(err?.message || ""));
+      if (!isFK) throw err;
+
+      const anonEmail = `deleted_${id}_${Date.now()}@example.com`;
+      const user = await prisma.user.update({
+        where: { id },
+        data: {
+          enabled: 0,
+          role: "user",
+          email: anonEmail, // anonymize เพื่อไม่ชน unique
+        },
+        select: { id: true, email: true, role: true, enabled: true },
+      });
+
+      return res.json({
+        ok: true,
+        softDeleted: true,
+        user,
+        message: "Soft-deleted (disabled & anonymized due to related records)",
+      });
+    }
+  } catch (err) {
+    console.error("deleteUser error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
