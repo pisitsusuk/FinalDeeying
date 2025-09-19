@@ -175,43 +175,76 @@ exports.listSlips = async (req, res) => {
 };
 
 
-// ✅ ลบผู้ใช้ (ลบจริง ถ้าติด FK จะ soft-delete)
+// ✅ ลบผู้ใช้แบบถาวร (hard delete) — เคลียร์ความสัมพันธ์ก่อนแล้วค่อยลบผู้ใช้
 exports.deleteUser = async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ ok: false, message: "invalid id" });
+
   try {
-    const id = Number(req.params.id);
-    if (!id) return res.status(400).json({ ok: false, message: "invalid id" });
-
-    try {
-      // ลบจริง
-      await prisma.user.delete({ where: { id } });
-      return res.json({ ok: true, hardDeleted: true, deletedId: id, message: "User deleted" });
-    } catch (err) {
-      // ถ้าติด Foreign Key constraint → ทำ soft-delete แทน
-      const isFK =
-        err?.code === "P2003" || /foreign key|constraint/i.test(String(err?.message || ""));
-      if (!isFK) throw err;
-
-      const anonEmail = `deleted_${id}_${Date.now()}@example.com`;
-      const user = await prisma.user.update({
-        where: { id },
-        data: {
-          enabled: false,      // <-- แก้จาก 0 เป็น Boolean
-          role: "user",
-          email: anonEmail,    // anonymize กันชน unique
-        },
-        select: { id: true, email: true, role: true, enabled: true },
+    await prisma.$transaction(async (tx) => {
+      // ----- 1) ลบตะกร้า + รายการสินค้าในตะกร้า + cart_addresses -----
+      const carts = await tx.cart.findMany({
+        where: { orderedById: id },
+        select: { id: true },
       });
+      const cartIds = carts.map((c) => c.id);
 
-      return res.json({
-        ok: true,
-        softDeleted: true,
-        user,
-        message: "Soft-deleted (disabled & anonymized due to related records)",
+      if (cartIds.length) {
+        // ลบสินค้าในตะกร้า
+        await tx.productOnCart.deleteMany({ where: { cartId: { in: cartIds } } });
+
+        // ลบ cart_addresses (ตารางนี้ไม่ได้อยู่ใน Prisma schema ใช้ raw SQL)
+        for (const cid of cartIds) {
+          await tx.$executeRawUnsafe(
+            `DELETE FROM cart_addresses WHERE "cartId" = ?`,
+            cid
+          );
+        }
+
+        // ลบตะกร้า
+        await tx.cart.deleteMany({ where: { id: { in: cartIds } } });
+      }
+
+      // ----- 2) ลบคำสั่งซื้อ + รายการสินค้าในคำสั่งซื้อ -----
+      const orders = await tx.order.findMany({
+        where: { orderedById: id },
+        select: { id: true },
       });
-    }
+      const orderIds = orders.map((o) => o.id);
+
+      if (orderIds.length) {
+        await tx.productOnOrder.deleteMany({ where: { orderId: { in: orderIds } } });
+        await tx.order.deleteMany({ where: { id: { in: orderIds } } });
+      }
+
+      // ----- 3) ลบสลิปโอน + รายการสินค้าในสลิป -----
+      const slips = await tx.$queryRawUnsafe(
+        `SELECT id FROM payment_slips WHERE user_id = ?`,
+        id
+      );
+      const slipIds = (slips || []).map((s) => s.id);
+
+      for (const sid of slipIds) {
+        await tx.$executeRawUnsafe(
+          `DELETE FROM payment_slip_items WHERE slip_id = ?`,
+          sid
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM payment_slips WHERE id = ?`,
+          sid
+        );
+      }
+
+      // ----- 4) ลบผู้ใช้ -----
+      await tx.user.delete({ where: { id } });
+    });
+
+    return res.json({ ok: true, deletedId: id, message: "User deleted permanently" });
   } catch (err) {
-    console.error("deleteUser error:", err);
-    return res.status(500).json({ ok: false, message: "Server error" });
+    console.error("hard deleteUser error:", err);
+    return res
+      .status(500)
+      .json({ ok: false, message: "Server error", detail: String(err?.message || err) });
   }
 };
 
