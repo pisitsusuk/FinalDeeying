@@ -14,7 +14,8 @@ const {
   setEnabled,
   getBankInfo,
   updateBankInfo,
-  listSlips,           // <-- เพิ่มอันนี้
+  listSlips,
+  deleteUser,           // <-- เพิ่มอันนี้
 } = require("../controllers/admin");
 
 /* ===== Orders ===== */
@@ -25,7 +26,7 @@ router.get("/admin/orders", authCheck, adminCheck, getOrderAdmin);
 router.get("/admin/users", authCheck, adminCheck, listUsers);
 router.patch("/admin/users/:id/role", authCheck, adminCheck, setRole);
 router.patch("/admin/users/:id/enabled", authCheck, adminCheck, setEnabled);
-
+router.delete("/admin/users/:id", authCheck, adminCheck, deleteUser); // <-- เพิ่มบรรทัดนี้
 /* ===== Bank Info ===== */
 router.get("/admin/bank-info", authCheck, adminCheck, getBankInfo);
 router.put("/admin/bank-info", authCheck, adminCheck, updateBankInfo);
