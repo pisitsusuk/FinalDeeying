@@ -26,7 +26,11 @@ const adminBankInfoRoutes = require("./routes/adminBankInfo");
 const addressRoutes = require("./routes/address"); // ที่อยู่จัดส่ง
 const productRoutes = require("./routes/product");
 // ===== CORS =====
-const ALLOW_ORIGINS = ["https://deeying-system.onrender.com"];
+const ALLOW_ORIGINS = [
+  "https://deeying-system.onrender.com",
+  "http://localhost:5173",
+  "http://localhost:3000"
+];
 app.use(
   cors({
     origin(origin, cb) {
@@ -78,7 +82,31 @@ function makeDB() {
         process.env.PG_SSL === "1" || /render|heroku|supabase/i.test(url)
           ? { rejectUnauthorized: false }
           : undefined,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+      maxUses: 7500,
+      allowExitOnIdle: true,
     });
+
+    // Handle pool errors
+    pool.on('error', (err) => {
+      console.error('[PG Pool] Unexpected error on idle client', err);
+    });
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('[PG Pool] Closing pool...');
+      await pool.end();
+      process.exit(0);
+    });
+
+    process.on('SIGTERM', async () => {
+      console.log('[PG Pool] Closing pool...');
+      await pool.end();
+      process.exit(0);
+    });
+
     const query = async (sql, params = []) => {
       // แปลง ? -> $1,$2,... สำหรับ PG
       let i = 0;
@@ -103,6 +131,10 @@ function makeDB() {
         waitForConnections: true,
         connectionLimit: 10,
         queueLimit: 0,
+        acquireTimeout: 30000,
+        timeout: 30000,
+        idleTimeout: 300000,
+        reconnect: true,
       });
 
   const db = {
