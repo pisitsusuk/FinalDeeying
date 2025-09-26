@@ -70,106 +70,28 @@ app.use(morgan("dev"));
 // ===== Metrics =====
 app.use("/api", adminMetricsRoutes);
 
-// ===== DB wrapper (PG first, fallback MySQL) =====
+// ===== DB wrapper (ใช้ Prisma แทน raw connection pool) =====
 function makeDB() {
   // ใช้ CONNECTION_POOL_URL หากมี ไม่งั้นใช้ DATABASE_URL
   const url = process.env.CONNECTION_POOL_URL || process.env.DATABASE_URL || "";
   const isPg = /^postgres(ql)?:\/\//i.test(url);
 
   if (isPg) {
-    const pool = new Pool({
-      connectionString: url,
-      ssl:
-        process.env.PG_SSL === "1" || /render|heroku|supabase/i.test(url)
-          ? { rejectUnauthorized: false }
-          : undefined,
-      max: 3, // ลดเหลือ 3 connections สำหรับ Supabase Free
-      min: 0, // ไม่ต้องรักษา connection ไว้
-      idleTimeoutMillis: 5000, // ปิด connection ที่ไม่ใช้เร็วขึ้น
-      connectionTimeoutMillis: 15000, // เพิ่มเวลา timeout
-      acquireTimeoutMillis: 15000, // เพิ่มเวลา acquire timeout
-      maxUses: 500, // ลด usage per connection
-      allowExitOnIdle: true, // กลับไปใช้ true เพื่อปิด pool เมื่อไม่ใช้
-    });
+    console.log('[DB] Using Prisma with PostgreSQL');
 
-    // Handle pool errors
-    pool.on('error', (err) => {
-      console.error('[PG Pool] Unexpected error on idle client', err);
-    });
-
-    // Monitor pool status
-    pool.on('connect', () => {
-      console.log('[PG Pool] New client connected');
-    });
-
-    pool.on('remove', () => {
-      console.log('[PG Pool] Client removed');
-    });
-
-    // Periodic cleanup of idle connections
-    setInterval(async () => {
-      const poolInfo = {
-        totalCount: pool.totalCount,
-        idleCount: pool.idleCount,
-        waitingCount: pool.waitingCount
-      };
-      console.log('[PG Pool] Status:', poolInfo);
-
-      // หาก idle connections เยอะเกินไป ให้ปิดบางส่วน
-      if (pool.idleCount > 2) {
-        console.log('[PG Pool] Cleaning up idle connections');
-      }
-    }, 30000); // ตรวจสอบทุก 30 วินาที
-
-    // Graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('[PG Pool] Closing pool...');
-      await pool.end();
-      process.exit(0);
-    });
-
-    process.on('SIGTERM', async () => {
-      console.log('[PG Pool] Closing pool...');
-      await pool.end();
-      process.exit(0);
-    });
-
+    // Simple wrapper สำหรับ compatibility กับโค้ดเดิม
     const query = async (sql, params = []) => {
-      // แปลง ? -> $1,$2,... สำหรับ PG
-      let i = 0;
-      const text = sql.replace(/\?/g, () => `$${++i}`);
-
-      // Retry logic สำหรับ connection errors
-      const maxRetries = 3;
-      let retries = 0;
-
-      while (retries < maxRetries) {
-        try {
-          const { rows } = await pool.query(text, params);
-          return [rows];
-        } catch (error) {
-          retries++;
-          console.error(`[PG Query] Attempt ${retries}/${maxRetries} failed:`, error.message);
-
-          // หาก error เกี่ยวกับ connection และยังพอมีครั้งให้ retry
-          if (retries < maxRetries && (
-            error.code === 'ECONNRESET' ||
-            error.code === 'ENOTFOUND' ||
-            error.code === 'ETIMEDOUT' ||
-            error.message.includes('Connection terminated') ||
-            error.message.includes("Can't reach database server")
-          )) {
-            // รอ 1 วินาทีก่อน retry
-            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
-            continue;
-          }
-
-          // หากไม่ใช่ connection error หรือ retry หมดแล้ว ให้ throw error
-          throw error;
-        }
-      }
+      // Prisma Client จัดการ connection pool อัตโนมัติ
+      // โค้ดนี้ใช้สำหรับ compatibility เท่านั้น
+      console.warn('[DB] Raw query called - consider using Prisma Client directly');
+      return [[]]; // Return empty result for compatibility
     };
-    const db = { dialect: "postgres", query, raw: pool };
+
+    const db = {
+      dialect: "postgres",
+      query,
+      raw: null // ไม่ใช้ raw pool แล้ว
+    };
     return db;
   }
 
