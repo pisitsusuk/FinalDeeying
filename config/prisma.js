@@ -3,17 +3,9 @@ const { PrismaClient } = require('@prisma/client')
 // Singleton pattern to prevent multiple instances
 const globalForPrisma = globalThis
 
-// Simplified Prisma configuration for Railway
-const prismaConfig = {
-  log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error']
-}
-
-// Railway handles connections well, no need for complex pooling
-if (process.env.NODE_ENV === 'production') {
-  console.log('[Prisma] Production mode - using Railway PostgreSQL');
-}
-
-const prisma = globalForPrisma.prisma ?? new PrismaClient(prismaConfig)
+const prisma = globalForPrisma.prisma ?? new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error']
+})
 
 if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = prisma

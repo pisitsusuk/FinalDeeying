@@ -70,25 +70,51 @@ app.use(morgan("dev"));
 // ===== Metrics =====
 app.use("/api", adminMetricsRoutes);
 
-// ===== DB wrapper (simplified for Railway + Prisma) =====
+// ===== DB wrapper (PG first, fallback MySQL) =====
 function makeDB() {
   const url = process.env.DATABASE_URL || "";
   const isPg = /^postgres(ql)?:\/\//i.test(url);
 
   if (isPg) {
-    console.log('[DB] Using Prisma with Railway PostgreSQL');
+    const pool = new Pool({
+      connectionString: url,
+      ssl:
+        process.env.PG_SSL === "1" || /render|heroku|supabase/i.test(url)
+          ? { rejectUnauthorized: false }
+          : undefined,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+      maxUses: 7500,
+      allowExitOnIdle: true,
+    });
 
-    // Simple wrapper สำหรับ compatibility กับโค้ดเดิม
+    // Handle pool errors
+    pool.on('error', (err) => {
+      console.error('[PG Pool] Unexpected error on idle client', err);
+    });
+
+    // Graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('[PG Pool] Closing pool...');
+      await pool.end();
+      process.exit(0);
+    });
+
+    process.on('SIGTERM', async () => {
+      console.log('[PG Pool] Closing pool...');
+      await pool.end();
+      process.exit(0);
+    });
+
     const query = async (sql, params = []) => {
-      console.warn('[DB] Raw query called - consider using Prisma Client directly');
-      return [[]]; // Return empty result for compatibility
+      // แปลง ? -> $1,$2,... สำหรับ PG
+      let i = 0;
+      const text = sql.replace(/\?/g, () => `$${++i}`);
+      const { rows } = await pool.query(text, params);
+      return [rows];
     };
-
-    const db = {
-      dialect: "postgres",
-      query,
-      raw: null
-    };
+    const db = { dialect: "postgres", query, raw: pool };
     return db;
   }
 
@@ -132,16 +158,7 @@ fs.mkdirSync(UP_DIR, { recursive: true });
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ===== Health =====
-app.get("/healthz", async (req, res) => {
-  try {
-    // ตรวจสอบการเชื่อมต่อฐานข้อมูล
-    await req.db.query("SELECT 1");
-    res.json({ ok: true, database: "connected" });
-  } catch (error) {
-    console.error("[Health Check] Database error:", error.message);
-    res.status(503).json({ ok: false, database: "disconnected", error: error.message });
-  }
-});
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
 /* =======================================================================
  *  Main Routes (สำคัญ: addressRoutes มาก่อน orderRoutes)
@@ -158,7 +175,7 @@ app.use("/api", productRoutes);
  * ======================================================================= */
 let sessionClient = null;
 try {
-    sessionClient = new dialogflow.SessionsClient();
+  sessionClient = new dialogflow.SessionsClient();
   console.log("[DF] ready project =", process.env.DIALOGFLOW_PROJECT_ID);
 } catch (e) {
   console.error("[DF] init error:", e.message || e);
