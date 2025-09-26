@@ -82,11 +82,13 @@ function makeDB() {
         process.env.PG_SSL === "1" || /render|heroku|supabase/i.test(url)
           ? { rejectUnauthorized: false }
           : undefined,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-      maxUses: 7500,
-      allowExitOnIdle: true,
+      max: 5, // ลดจาก 20 -> 5 สำหรับ Supabase Free
+      min: 1, // รักษา connection ไว้อย่างน้อย 1
+      idleTimeoutMillis: 10000, // ลดจาก 30000 -> 10000
+      connectionTimeoutMillis: 10000, // เพิ่มจาก 5000 -> 10000
+      acquireTimeoutMillis: 10000, // timeout สำหรับการขอ connection
+      maxUses: 1000, // ลดจาก 7500 -> 1000
+      allowExitOnIdle: false, // เปลี่ยนจาก true -> false
     });
 
     // Handle pool errors
@@ -111,8 +113,36 @@ function makeDB() {
       // แปลง ? -> $1,$2,... สำหรับ PG
       let i = 0;
       const text = sql.replace(/\?/g, () => `$${++i}`);
-      const { rows } = await pool.query(text, params);
-      return [rows];
+
+      // Retry logic สำหรับ connection errors
+      const maxRetries = 3;
+      let retries = 0;
+
+      while (retries < maxRetries) {
+        try {
+          const { rows } = await pool.query(text, params);
+          return [rows];
+        } catch (error) {
+          retries++;
+          console.error(`[PG Query] Attempt ${retries}/${maxRetries} failed:`, error.message);
+
+          // หาก error เกี่ยวกับ connection และยังพอมีครั้งให้ retry
+          if (retries < maxRetries && (
+            error.code === 'ECONNRESET' ||
+            error.code === 'ENOTFOUND' ||
+            error.code === 'ETIMEDOUT' ||
+            error.message.includes('Connection terminated') ||
+            error.message.includes("Can't reach database server")
+          )) {
+            // รอ 1 วินาทีก่อน retry
+            await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+            continue;
+          }
+
+          // หากไม่ใช่ connection error หรือ retry หมดแล้ว ให้ throw error
+          throw error;
+        }
+      }
     };
     const db = { dialect: "postgres", query, raw: pool };
     return db;
@@ -158,7 +188,16 @@ fs.mkdirSync(UP_DIR, { recursive: true });
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ===== Health =====
-app.get("/healthz", (_req, res) => res.json({ ok: true }));
+app.get("/healthz", async (req, res) => {
+  try {
+    // ตรวจสอบการเชื่อมต่อฐานข้อมูล
+    await req.db.query("SELECT 1");
+    res.json({ ok: true, database: "connected" });
+  } catch (error) {
+    console.error("[Health Check] Database error:", error.message);
+    res.status(503).json({ ok: false, database: "disconnected", error: error.message });
+  }
+});
 
 /* =======================================================================
  *  Main Routes (สำคัญ: addressRoutes มาก่อน orderRoutes)
@@ -175,7 +214,7 @@ app.use("/api", productRoutes);
  * ======================================================================= */
 let sessionClient = null;
 try {
-  sessionClient = new dialogflow.SessionsClient();
+    sessionClient = new dialogflow.SessionsClient();
   console.log("[DF] ready project =", process.env.DIALOGFLOW_PROJECT_ID);
 } catch (e) {
   console.error("[DF] init error:", e.message || e);
