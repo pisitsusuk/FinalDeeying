@@ -60,6 +60,7 @@ app.use(bodyParser.urlencoded({ extended: true, limit: "10mb" }));
   "CLOUDINARY_API_SECRET",
   "DIALOGFLOW_PROJECT_ID",
   "GOOGLE_APPLICATION_CREDENTIALS",
+  "SHOP_URL",
 ].forEach((k) => {
   if (!process.env[k]) console.warn(`[WARN] Missing env ${k}`);
 });
@@ -173,6 +174,7 @@ app.use("/api", productRoutes);
 /* =======================================================================
  *                    DIALOGFLOW + PRICE CHAT HANDLER
  * ======================================================================= */
+  
 let sessionClient = null;
 try {
   sessionClient = new dialogflow.SessionsClient();
@@ -236,7 +238,7 @@ async function findProductInDB(dbWrap, name) {
 }
 
 // ... โค้ดส่วนล่าง (เหมือนเดิม) ...
-
+const SHOP_URL = process.env.SHOP_URL || "https://deeying-system.onrender.com/shop";
 
 async function chatHandler(req, res) {
   const message = (req.body?.message ?? req.body?.text ?? req.body?.q ?? "")
@@ -272,6 +274,13 @@ async function chatHandler(req, res) {
           },
         },
       });
+    }
+  // การแนบลิงก์ Shop” สำหรับ 3 intent 
+     const intentsShowShop = new Set(["มีอะไรขาย", "ตราชั่งเล็ก", "ตราชั่งใหญ่"]);
+    if (intent && intentsShowShop.has(intent)) {
+      const base = result?.fulfillmentText || "สามารถดูสินค้าทั้งหมดได้เลยครับ";
+      const withLink = `${base}\n\nShop >> ${SHOP_URL}`;
+      return res.json({ reply: withLink });
     }
 
     if (result?.fulfillmentText)
