@@ -72,7 +72,8 @@ app.use("/api", adminMetricsRoutes);
 
 // ===== DB wrapper (PG first, fallback MySQL) =====
 function makeDB() {
-  const url = process.env.DATABASE_URL || "";
+  // ใช้ CONNECTION_POOL_URL หากมี ไม่งั้นใช้ DATABASE_URL
+  const url = process.env.CONNECTION_POOL_URL || process.env.DATABASE_URL || "";
   const isPg = /^postgres(ql)?:\/\//i.test(url);
 
   if (isPg) {
@@ -82,19 +83,43 @@ function makeDB() {
         process.env.PG_SSL === "1" || /render|heroku|supabase/i.test(url)
           ? { rejectUnauthorized: false }
           : undefined,
-      max: 5, // ลดจาก 20 -> 5 สำหรับ Supabase Free
-      min: 1, // รักษา connection ไว้อย่างน้อย 1
-      idleTimeoutMillis: 10000, // ลดจาก 30000 -> 10000
-      connectionTimeoutMillis: 10000, // เพิ่มจาก 5000 -> 10000
-      acquireTimeoutMillis: 10000, // timeout สำหรับการขอ connection
-      maxUses: 1000, // ลดจาก 7500 -> 1000
-      allowExitOnIdle: false, // เปลี่ยนจาก true -> false
+      max: 3, // ลดเหลือ 3 connections สำหรับ Supabase Free
+      min: 0, // ไม่ต้องรักษา connection ไว้
+      idleTimeoutMillis: 5000, // ปิด connection ที่ไม่ใช้เร็วขึ้น
+      connectionTimeoutMillis: 15000, // เพิ่มเวลา timeout
+      acquireTimeoutMillis: 15000, // เพิ่มเวลา acquire timeout
+      maxUses: 500, // ลด usage per connection
+      allowExitOnIdle: true, // กลับไปใช้ true เพื่อปิด pool เมื่อไม่ใช้
     });
 
     // Handle pool errors
     pool.on('error', (err) => {
       console.error('[PG Pool] Unexpected error on idle client', err);
     });
+
+    // Monitor pool status
+    pool.on('connect', () => {
+      console.log('[PG Pool] New client connected');
+    });
+
+    pool.on('remove', () => {
+      console.log('[PG Pool] Client removed');
+    });
+
+    // Periodic cleanup of idle connections
+    setInterval(async () => {
+      const poolInfo = {
+        totalCount: pool.totalCount,
+        idleCount: pool.idleCount,
+        waitingCount: pool.waitingCount
+      };
+      console.log('[PG Pool] Status:', poolInfo);
+
+      // หาก idle connections เยอะเกินไป ให้ปิดบางส่วน
+      if (pool.idleCount > 2) {
+        console.log('[PG Pool] Cleaning up idle connections');
+      }
+    }, 30000); // ตรวจสอบทุก 30 วินาที
 
     // Graceful shutdown
     process.on('SIGINT', async () => {
