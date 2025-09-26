@@ -70,19 +70,16 @@ app.use(morgan("dev"));
 // ===== Metrics =====
 app.use("/api", adminMetricsRoutes);
 
-// ===== DB wrapper (ใช้ Prisma แทน raw connection pool) =====
+// ===== DB wrapper (simplified for Railway + Prisma) =====
 function makeDB() {
-  // ใช้ CONNECTION_POOL_URL หากมี ไม่งั้นใช้ DATABASE_URL
-  const url = process.env.CONNECTION_POOL_URL || process.env.DATABASE_URL || "";
+  const url = process.env.DATABASE_URL || "";
   const isPg = /^postgres(ql)?:\/\//i.test(url);
 
   if (isPg) {
-    console.log('[DB] Using Prisma with PostgreSQL');
+    console.log('[DB] Using Prisma with Railway PostgreSQL');
 
     // Simple wrapper สำหรับ compatibility กับโค้ดเดิม
     const query = async (sql, params = []) => {
-      // Prisma Client จัดการ connection pool อัตโนมัติ
-      // โค้ดนี้ใช้สำหรับ compatibility เท่านั้น
       console.warn('[DB] Raw query called - consider using Prisma Client directly');
       return [[]]; // Return empty result for compatibility
     };
@@ -90,7 +87,7 @@ function makeDB() {
     const db = {
       dialect: "postgres",
       query,
-      raw: null // ไม่ใช้ raw pool แล้ว
+      raw: null
     };
     return db;
   }
