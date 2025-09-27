@@ -246,3 +246,38 @@ exports.getOrder = async (req, res) => {
     res.status(500).json({ ok: false, message: "Server Error" });
   }
 };
+
+
+exports.remove = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
+    }
+
+    // ห้ามลบถ้ามีประวัติคำสั่งซื้อ
+    const hasOrders = await prisma.order.count({ where: { orderedById: id } });
+    if (hasOrders > 0) {
+      return res.status(409).json({
+        ok: false,
+        message: "ลบผู้ใช้ไม่ได้ เนื่องจากผู้ใช้นี้มีประวัติคำสั่งซื้ออยู่ในระบบ",
+      });
+    }
+
+    await prisma.user.delete({ where: { id } });
+    return res.json({ ok: true });
+  } catch (err) {
+    if (err?.code === "P2025") {
+      return res.status(404).json({ ok: false, message: "ไม่พบผู้ใช้" });
+    }
+    if (err?.code === "P2003") {
+      // กันกรณี FK อื่นอ้างอิงอยู่
+      return res.status(409).json({
+        ok: false,
+        message: "ลบผู้ใช้ไม่ได้ เนื่องจากข้อมูลนี้ยังถูกอ้างอิงในระบบ",
+      });
+    }
+    console.error("user.remove error:", err);
+    return res.status(500).json({ ok: false, message: "Server error" });
+  }
+};
