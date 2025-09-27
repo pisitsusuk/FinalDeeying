@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 
 // ใช้ middleware ให้ตรงกับไฟล์ของโปรเจกต์คุณ (เดิม product ใช้ "../middlewares/auth")
-const { authCheck, adminCheck } = require("../middlewares/auth");
+const { authCheck, adminCheck } = require("../middlewares/authCheck");
 
 const {
   create,
