@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { authCheck /*, adminCheck*/ } = require("../middlewares/authCheck");
+const { authCheck , adminCheck } = require("../middlewares/authCheck");
 
 const {
   listUsers,
