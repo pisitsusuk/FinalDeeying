@@ -288,5 +288,3 @@ exports.remove = async (req, res) => {
     return res.status(500).json({ ok: false, message: "Server error" });
   }
 };
-
-};
