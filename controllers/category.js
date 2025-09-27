@@ -34,16 +34,34 @@ exports.remove = async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ ok:false, message:"id ไม่ถูกต้อง" });
 
-    const item = await prisma.category.delete({ where:{ id } });
-    return res.json({ ok:true, item });
+    // เช็คก่อนว่ามีสินค้าอยู่ในหมวดนี้ไหม
+    const inProducts = await prisma.product.count({ where: { categoryId: id } });
+    if (inProducts > 0) {
+      return res.status(409).json({
+        ok: false,
+        message: "ลบหมวดหมู่ไม่ได้ เนื่องจากยังมีสินค้าอยู่ในหมวดนี้ กรุณาย้ายสินค้าหรือเปลี่ยนหมวดหมู่ก่อน",
+        count: inProducts,
+      });
+    }
+
+    await prisma.category.delete({ where: { id } });
+    return res.json({ ok:true });
   } catch (err) {
+    if (err?.code === "P2025") {
+      return res.status(404).json({ ok:false, message:"ไม่พบหมวดหมู่" });
+    }
     if (err?.code === "P2003") {
-      return res.status(409).json({ ok:false, message:"ลบไม่ได้ มีสินค้าที่ใช้หมวดนี้อยู่" });
+      // กันกรณีฐานข้อมูลยังมี FK อื่นอ้างอิง (กันไว้เป็น safety net)
+      return res.status(409).json({
+        ok:false,
+        message: "ลบหมวดหมู่ไม่ได้ เนื่องจากยังมีการอ้างอิงอยู่ในระบบ",
+      });
     }
     console.error("category.remove error:", err);
     return res.status(500).json({ ok:false, message:"Server error" });
   }
 };
+
 
 exports.updateCategory = async (req, res) => {
   try {
