@@ -256,24 +256,58 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
-    // เช็กทั้ง Order และ Slip (นับพร้อมกัน)
-    const [orderCount, slipCount] = await Promise.all([
-      prisma.order.count({ where: { orderedById: id } }),
-      // ใช้ Prisma model paymentSlip ที่คุณมีอยู่แล้ว (ฟิลด์เป็น snake_case)
-      prisma.paymentSlip.count({ where: { user_id: id } }).catch(() => 0),
-    ]);
+    // เช็กเฉพาะ "สลิป"
+    const slipCount = await prisma.paymentSlip
+      .count({ where: { user_id: id } })
+      .catch(() => 0);
 
-    if (orderCount > 0 || slipCount > 0) {
+    if (slipCount > 0) {
       return res.status(409).json({
         ok: false,
-        code: "USER_HAS_HISTORY",
-        message: `ลบผู้ใช้ไม่ได้: มีคำสั่งซื้อ ${orderCount} รายการ และสลิป ${slipCount} ใบ`,
-        counts: { orders: orderCount, slips: slipCount },
+        code: "USER_HAS_SLIPS",
+        message: `ลบผู้ใช้ไม่ได้: พบสลิป ${slipCount} ใบ`,
+        counts: { slips: slipCount },
       });
     }
 
-    await prisma.user.delete({ where: { id } });
-    return res.json({ ok: true });
+    // ไม่มีสลิป → เคลียร์ความสัมพันธ์ที่เหลือแล้วลบ user (กันติด FK)
+    await prisma.$transaction(async (tx) => {
+      // carts + productOnCart + cart_addresses
+      const carts = await tx.cart.findMany({
+        where: { orderedById: id },
+        select: { id: true },
+      });
+      const cartIds = carts.map((c) => c.id);
+
+      if (cartIds.length) {
+        await tx.productOnCart.deleteMany({ where: { cartId: { in: cartIds } } });
+        // cart_addresses ไม่มีใน Prisma → ลบแบบ raw ทั้ง 2 case (pg/mysql)
+        for (const cid of cartIds) {
+          await tx.$executeRaw`DELETE FROM cart_addresses WHERE "cartId" = ${cid}`;
+          await tx.$executeRaw`DELETE FROM cart_addresses WHERE cart_id = ${cid}`;
+        }
+        await tx.cart.deleteMany({ where: { id: { in: cartIds } } });
+      }
+
+      // orders + productOnOrder
+      const orders = await tx.order.findMany({
+        where: { orderedById: id },
+        select: { id: true },
+      });
+      const orderIds = orders.map((o) => o.id);
+      if (orderIds.length) {
+        await tx.productOnOrder.deleteMany({ where: { orderId: { in: orderIds } } });
+        await tx.order.deleteMany({ where: { id: { in: orderIds } } });
+      }
+
+      // เผื่อมีสลิปค้าง (ตามเงื่อนไขปกติควรเป็น 0)
+      await tx.paymentSlip.deleteMany({ where: { user_id: id } });
+
+      // ลบผู้ใช้จริง
+      await tx.user.delete({ where: { id } });
+    });
+
+    return res.json({ ok: true, deletedId: id });
   } catch (err) {
     if (err?.code === "P2025") {
       return res.status(404).json({ ok: false, message: "ไม่พบผู้ใช้" });
@@ -281,7 +315,7 @@ exports.remove = async (req, res) => {
     if (err?.code === "P2003") {
       return res.status(409).json({
         ok: false,
-        message: "ลบผู้ใช้ไม่ได้ เนื่องจากข้อมูลนี้ยังถูกอ้างอิงในระบบ",
+        message: "ลบผู้ใช้ไม่ได้ เนื่องจากข้อมูลยังถูกอ้างอิงในระบบ",
       });
     }
     console.error("user.remove error:", err);
