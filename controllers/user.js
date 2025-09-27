@@ -247,8 +247,7 @@ exports.getOrder = async (req, res) => {
   }
 };
 
-
-
+// ✅ ลบผู้ใช้: กลับมาเช็กทั้ง "คำสั่งซื้อ" และ "สลิป" เหมือนเดิม
 exports.remove = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -256,21 +255,22 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
-    // เช็กเฉพาะ "สลิป"
-    const slipCount = await prisma.paymentSlip
-      .count({ where: { user_id: id } })
-      .catch(() => 0);
+    // เช็กจำนวนคำสั่งซื้อและสลิปของผู้ใช้
+    const [orderCount, slipCount] = await Promise.all([
+      prisma.order.count({ where: { orderedById: id } }).catch(() => 0),
+      prisma.paymentSlip.count({ where: { user_id: id } }).catch(() => 0),
+    ]);
 
-    if (slipCount > 0) {
+    if (orderCount > 0 || slipCount > 0) {
       return res.status(409).json({
         ok: false,
-        code: "USER_HAS_SLIPS",
-        message: `ลบผู้ใช้ไม่ได้: พบสลิป ${slipCount} ใบ`,
-        counts: { slips: slipCount },
+        code: "USER_HAS_ORDERS_OR_SLIPS",
+        message: `ลบผู้ใช้ไม่ได้เนื่องจากมีคำสั่งซื้อหรือเคยมีคำสั่งซื้ออยู่`,
+        counts: { orders: orderCount, slips: slipCount },
       });
     }
 
-    // ไม่มีสลิป → เคลียร์ความสัมพันธ์ที่เหลือแล้วลบ user (กันติด FK)
+    // ไม่มีออเดอร์และไม่มีสลิป ⇒ ลบได้
     await prisma.$transaction(async (tx) => {
       // carts + productOnCart + cart_addresses
       const carts = await tx.cart.findMany({
@@ -281,7 +281,7 @@ exports.remove = async (req, res) => {
 
       if (cartIds.length) {
         await tx.productOnCart.deleteMany({ where: { cartId: { in: cartIds } } });
-        // cart_addresses ไม่มีใน Prisma → ลบแบบ raw ทั้ง 2 case (pg/mysql)
+        // cart_addresses ไม่มีใน Prisma → ลบแบบ raw รองรับทั้ง pg/mysql
         for (const cid of cartIds) {
           await tx.$executeRaw`DELETE FROM cart_addresses WHERE "cartId" = ${cid}`;
           await tx.$executeRaw`DELETE FROM cart_addresses WHERE cart_id = ${cid}`;
@@ -289,18 +289,7 @@ exports.remove = async (req, res) => {
         await tx.cart.deleteMany({ where: { id: { in: cartIds } } });
       }
 
-      // orders + productOnOrder
-      const orders = await tx.order.findMany({
-        where: { orderedById: id },
-        select: { id: true },
-      });
-      const orderIds = orders.map((o) => o.id);
-      if (orderIds.length) {
-        await tx.productOnOrder.deleteMany({ where: { orderId: { in: orderIds } } });
-        await tx.order.deleteMany({ where: { id: { in: orderIds } } });
-      }
-
-      // เผื่อมีสลิปค้าง (ตามเงื่อนไขปกติควรเป็น 0)
+      // เผื่อมีสลิปตกค้าง (ตามเงื่อนไขข้างบนควรเป็น 0)
       await tx.paymentSlip.deleteMany({ where: { user_id: id } });
 
       // ลบผู้ใช้จริง
