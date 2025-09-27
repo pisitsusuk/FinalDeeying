@@ -122,14 +122,41 @@ exports.update = async (req, res) => {
 exports.remove = async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
+    }
+
+    // ❗กันลบ: ถ้ามีออเดอร์ที่มีสินค้านี้อยู่
+    const usedInOrders = await prisma.productOnOrder.count({
+      where: { productId: id },
+    });
+    if (usedInOrders > 0) {
+      return res.status(409).json({
+        ok: false,
+        message:
+          "ลบสินค้าไม่ได้ เนื่องจากสินค้านี้มีอยู่ในคำสั่งซื้อ",
+        count: usedInOrders,
+      });
+    }
+
     await prisma.product.delete({ where: { id } });
     return res.json({ ok: true });
   } catch (e) {
+    if (e?.code === "P2025") {
+      return res.status(404).json({ ok: false, message: "ไม่พบสินค้า" });
+    }
+    if (e?.code === "P2003") {
+      // กันกรณีฐานข้อมูลมีการอ้างอิงอื่น ๆ (safety net)
+      return res.status(409).json({
+        ok: false,
+        message: "ลบสินค้าไม่ได้ เนื่องจากข้อมูลนี้ยังถูกอ้างอิงในระบบ",
+      });
+    }
     console.error("remove product error:", e);
     return res.status(500).json({ ok: false, message: "ลบสินค้าไม่สำเร็จ" });
   }
 };
+
 
 /* ========== Images (Cloudinary) ========== */
 // รองรับทั้ง multipart (req.file / req.files[0]) และ dataURL (req.body.image)
