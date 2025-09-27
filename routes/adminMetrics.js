@@ -13,7 +13,7 @@ router.get("/metrics", authCheck, adminCheck, async (_req, res) => {
     const [
       usersCount,
       productsCount,
-      ordersCount,
+      ordersCount,           // ← จะตั้งค่าเป็นจำนวน "สลิปทั้งหมด"
       pendingCount,
       approvedSlips,
       categories,
@@ -21,7 +21,10 @@ router.get("/metrics", authCheck, adminCheck, async (_req, res) => {
     ] = await Promise.all([
       prisma.user.count({ where: { enabled: true } }),
       prisma.product.count({ where: { deleted: false } }),
-      prisma.order.count(),
+      // ---------------------- CHANGED ----------------------
+      // เดิม: prisma.order.count(),
+      prisma.paymentSlip.count(), // นับจากสลิปทั้งหมดให้ตรงกับหน้า Approve
+      // -----------------------------------------------------
       prisma.paymentSlip.count({ where: { status: "PENDING" } }),
       prisma.paymentSlip.findMany({
         where: { status: "APPROVED" },
@@ -85,7 +88,7 @@ router.get("/metrics", authCheck, adminCheck, async (_req, res) => {
         kpis: {
           users: usersCount,
           products: productsCount,
-          orders: ordersCount,
+          orders: ordersCount,           // ← ตัวเลขนี้จะเท่ากับจำนวนสลิปทั้งหมด
           revenueApproved,
           pending: pendingCount,
         },
