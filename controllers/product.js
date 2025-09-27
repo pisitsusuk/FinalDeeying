@@ -119,8 +119,38 @@ exports.update = async (req, res) => {
   }
 };
 
-// controllers/product.js
-// helper: นับจำนวนออเดอร์ที่มีสินค้านี้ (พยายามให้ครอบคลุมทุกเคส)
+/* -------------------- Helpers สำหรับตรวจการใช้งานสินค้า -------------------- */
+
+// helper: นับจำนวนสลิปที่มีสินค้านี้อยู่ (กันลบถ้ามีในสลิป)
+async function countProductInSlips(productId) {
+  // 1) Prisma (ถ้ามี model ตามที่ใช้ในโปรเจกต์)
+  try {
+    const c = await prisma.paymentSlipItem.count({ where: { product_id: productId } });
+    if (c > 0) return c;
+  } catch {}
+
+  // 2) Postgres raw
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT COUNT(*)::int AS c FROM payment_slip_items WHERE product_id = ${productId}
+    `;
+    const c = Number(rows?.[0]?.c || 0);
+    if (c > 0) return c;
+  } catch {}
+
+  // 3) MySQL raw
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT COUNT(*) AS c FROM payment_slip_items WHERE product_id = ${productId}
+    `;
+    const c = Number(rows?.[0]?.c || 0);
+    if (c > 0) return c;
+  } catch {}
+
+  return 0;
+}
+
+// helper: นับจำนวนออเดอร์ที่มีสินค้านี้ (เผื่อกันพลาดจากฝั่ง Order ด้วย)
 async function countProductUsedInOrders(id) {
   // 1) ผ่าน relation ปกติของ Prisma
   try {
@@ -146,7 +176,7 @@ async function countProductUsedInOrders(id) {
     if (c > 0) return c;
   } catch {}
 
-  // 4) กันพลาดด้วยการไล่นับผ่าน Order->products (ถ้า schema รองรับ)
+  // 4) ไล่นับผ่าน Order->products (ถ้า schema รองรับ)
   try {
     const c4 = await prisma.order.count({
       where: { products: { some: { productId: id } } },
@@ -164,6 +194,18 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
+    // ❗ กันลบถ้ามีอยู่ใน "สลิป"
+    const inSlip = await countProductInSlips(id);
+    if (inSlip > 0) {
+      return res.status(409).json({
+        ok: false,
+        code: "PRODUCT_IN_SLIPS",
+        message: `ลบสินค้าไม่ได้ เนื่องจากสินค้านี้อยู่ในสลิป ${inSlip} ใบ`,
+        count: inSlip,
+      });
+    }
+
+    // (คง guard ฝั่งออเดอร์ไว้ด้วย เพื่อความปลอดภัยของข้อมูล)
     const usedCount = await countProductUsedInOrders(id);
     if (usedCount > 0) {
       return res.status(409).json({
@@ -184,7 +226,6 @@ exports.remove = async (req, res) => {
     return res.status(500).json({ ok: false, message: "ลบสินค้าไม่สำเร็จ" });
   }
 };
-
 
 
 
