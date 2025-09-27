@@ -121,27 +121,32 @@ exports.update = async (req, res) => {
 
 /* -------------------- Helpers สำหรับตรวจการใช้งานสินค้า -------------------- */
 
-// helper: นับจำนวนสลิปที่มีสินค้านี้อยู่ (กันลบถ้ามีในสลิป)
+/** นับจำนวน “สลิปที่ยังมีอยู่จริงในตาราง payment_slips” ที่มีสินค้านี้
+ *  - นับเฉพาะสลิปสถานะ PENDING/APPROVED (รายการที่มีผลต่อการขาย)
+ *  - ไม่สนใจ snapshot ที่ถูกทิ้งไว้ลอย ๆ ใน payment_slip_items
+ */
 async function countProductInSlips(productId) {
-  // 1) Prisma (ถ้ามี model ตามที่ใช้ในโปรเจกต์)
-  try {
-    const c = await prisma.paymentSlipItem.count({ where: { product_id: productId } });
-    if (c > 0) return c;
-  } catch {}
-
-  // 2) Postgres raw
+  // Postgres
   try {
     const rows = await prisma.$queryRaw`
-      SELECT COUNT(*)::int AS c FROM payment_slip_items WHERE product_id = ${productId}
+      SELECT COUNT(*)::int AS c
+      FROM payment_slip_items psi
+      JOIN payment_slips ps ON ps.id = psi.slip_id
+      WHERE psi.product_id = ${productId}
+        AND ps.status IN ('PENDING','APPROVED')
     `;
     const c = Number(rows?.[0]?.c || 0);
     if (c > 0) return c;
   } catch {}
 
-  // 3) MySQL raw
+  // MySQL
   try {
     const rows = await prisma.$queryRaw`
-      SELECT COUNT(*) AS c FROM payment_slip_items WHERE product_id = ${productId}
+      SELECT COUNT(*) AS c
+      FROM payment_slip_items psi
+      JOIN payment_slips ps ON ps.id = psi.slip_id
+      WHERE psi.product_id = ${productId}
+        AND ps.status IN ('PENDING','APPROVED')
     `;
     const c = Number(rows?.[0]?.c || 0);
     if (c > 0) return c;
@@ -150,7 +155,7 @@ async function countProductInSlips(productId) {
   return 0;
 }
 
-// helper: นับจำนวนออเดอร์ที่มีสินค้านี้ (เผื่อกันพลาดจากฝั่ง Order ด้วย)
+// helper: นับจำนวนออเดอร์ที่มีสินค้านี้ (กันพลาดจากฝั่ง Order ด้วย)
 async function countProductUsedInOrders(id) {
   // 1) ผ่าน relation ปกติของ Prisma
   try {
@@ -194,18 +199,19 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
-    // ❗ กันลบถ้ามีอยู่ใน "สลิป"
+    // ❗ อนุญาตให้ลบได้เมื่อ “หน้า Approve ไม่มีรายการที่มีสินค้านี้”
+    //    = ไม่มีสลิป PENDING/APPROVED ที่ยังอยู่ในระบบอ้างอิงสินค้านี้
     const inSlip = await countProductInSlips(id);
     if (inSlip > 0) {
       return res.status(409).json({
         ok: false,
         code: "PRODUCT_IN_SLIPS",
-        message: `ลบสินค้าไม่ได้ เนื่องจากสินค้านี้อยู่ในสลิป ${inSlip} ใบ`,
+        message: `ลบสินค้าไม่ได้ เนื่องจากสินค้านี้อยู่ในสลิปที่ยังมีอยู่ ${inSlip} ใบ`,
         count: inSlip,
       });
     }
 
-    // (คง guard ฝั่งออเดอร์ไว้ด้วย เพื่อความปลอดภัยของข้อมูล)
+    // กันลบถ้ามีอยู่ใน “ออเดอร์” จริง ๆ (ปลอดภัยไว้ก่อน)
     const usedCount = await countProductUsedInOrders(id);
     if (usedCount > 0) {
       return res.status(409).json({
