@@ -248,6 +248,7 @@ exports.getOrder = async (req, res) => {
 };
 
 
+
 exports.remove = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -255,12 +256,19 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
-    // ห้ามลบถ้ามีประวัติคำสั่งซื้อ
-    const hasOrders = await prisma.order.count({ where: { orderedById: id } });
-    if (hasOrders > 0) {
+    // เช็กทั้ง Order และ Slip (นับพร้อมกัน)
+    const [orderCount, slipCount] = await Promise.all([
+      prisma.order.count({ where: { orderedById: id } }),
+      // ใช้ Prisma model paymentSlip ที่คุณมีอยู่แล้ว (ฟิลด์เป็น snake_case)
+      prisma.paymentSlip.count({ where: { user_id: id } }).catch(() => 0),
+    ]);
+
+    if (orderCount > 0 || slipCount > 0) {
       return res.status(409).json({
         ok: false,
-        message: "ลบผู้ใช้ไม่ได้ เนื่องจากผู้ใช้นี้มีประวัติคำสั่งซื้ออยู่ในระบบ",
+        code: "USER_HAS_HISTORY",
+        message: `ลบผู้ใช้ไม่ได้: มีคำสั่งซื้อ ${orderCount} รายการ และสลิป ${slipCount} ใบ`,
+        counts: { orders: orderCount, slips: slipCount },
       });
     }
 
@@ -271,7 +279,6 @@ exports.remove = async (req, res) => {
       return res.status(404).json({ ok: false, message: "ไม่พบผู้ใช้" });
     }
     if (err?.code === "P2003") {
-      // กันกรณี FK อื่นอ้างอิงอยู่
       return res.status(409).json({
         ok: false,
         message: "ลบผู้ใช้ไม่ได้ เนื่องจากข้อมูลนี้ยังถูกอ้างอิงในระบบ",
@@ -280,4 +287,6 @@ exports.remove = async (req, res) => {
     console.error("user.remove error:", err);
     return res.status(500).json({ ok: false, message: "Server error" });
   }
+};
+
 };
