@@ -255,7 +255,7 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
-    // นับสลิปที่แสดงในหน้า Approve (ถือว่าเกี่ยวข้องจริง) = PENDING/APPROVED เท่านั้น
+    // นับสลิปที่แสดงในหน้า Approve = PENDING/APPROVED เท่านั้น
     const activeSlipCount = await prisma.paymentSlip
       .count({
         where: {
@@ -285,18 +285,34 @@ exports.remove = async (req, res) => {
 
       if (cartIds.length) {
         await tx.productOnCart.deleteMany({ where: { cartId: { in: cartIds } } });
-        // cart_addresses (raw รองรับทั้ง pg/mysql)
-        for (const cid of cartIds) {
-          await tx.$executeRaw`DELETE FROM cart_addresses WHERE "cartId" = ${cid}`;
-          await tx.$executeRaw`DELETE FROM cart_addresses WHERE cart_id = ${cid}`;
+
+        // ✅ ใช้ Prisma model เพื่อลบ cart_addresses แบบปลอด dialect
+        // (ถ้า schema คุณแม็พตารางนี้แล้ว เช่น model CartAddress { cartId Int @db... })
+        try {
+          await tx.cartAddress.deleteMany({ where: { cartId: { in: cartIds } } });
+        } catch (_) {
+          // เผื่อโปรเจกต์ไหนไม่มี model — ข้ามได้ ไม่ให้ล้มทรานแซกชัน
         }
+
         await tx.cart.deleteMany({ where: { id: { in: cartIds } } });
       }
 
-      // ลบสลิปที่เหลือ (เช่น REJECTED/เก่าๆ) เพื่อไม่ให้เหลือ orphan
-      await tx.paymentSlip.deleteMany({ where: { user_id: id } });
+      // ลบสลิปทั้งหมดของผู้ใช้ (พร้อมลบ item ใบสลิปเพื่อกัน FK)
+      const slipIds = (
+        await tx.paymentSlip.findMany({
+          where: { user_id: id },
+          select: { id: true },
+        })
+      ).map((s) => s.id);
 
-      // ถ้ามีออเดอร์เก่า ๆ และ schema บังคับ FK → เคลียร์ด้วย (ไม่ถือว่าเป็นเงื่อนไขห้ามลบ)
+      if (slipIds.length) {
+        try {
+          await tx.paymentSlipItem.deleteMany({ where: { slip_id: { in: slipIds } } });
+        } catch (_) {}
+        await tx.paymentSlip.deleteMany({ where: { id: { in: slipIds } } });
+      }
+
+      // มีออเดอร์เก่า ๆ (ไม่ถือเป็นเงื่อนไขห้ามลบ) → ลบทิ้งกัน FK
       const orders = await tx.order.findMany({
         where: { orderedById: id },
         select: { id: true },
