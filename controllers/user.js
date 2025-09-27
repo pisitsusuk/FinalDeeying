@@ -269,7 +269,7 @@ exports.remove = async (req, res) => {
       return res.status(409).json({
         ok: false,
         code: "USER_HAS_ACTIVE_SLIPS",
-        message: `ลบผู้ใช้ไม่ได้: พบสลิปในหน้า Approve ${activeSlipCount} ใบ`,
+        message: `ลบผู้ใช้ไม่ได้เนื่องจากยังมีคำสั่งซื้ออยู่`,
         counts: { activeSlips: activeSlipCount },
       });
     }
