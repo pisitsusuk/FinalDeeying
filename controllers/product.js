@@ -206,7 +206,7 @@ exports.remove = async (req, res) => {
       return res.status(409).json({
         ok: false,
         code: "PRODUCT_IN_SLIPS",
-        message: `ลบสินค้าไม่ได้ เนื่องจากสินค้านี้อยู่ในสลิปที่ยังมีอยู่ ${inSlip} ใบ`,
+        message: `ลบสินค้าไม่ได้ เนื่องจากมีสินค้านี้อยู่ในคำสั่งซื้อ`,
         count: inSlip,
       });
     }
