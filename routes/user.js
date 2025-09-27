@@ -12,6 +12,7 @@ const {
   saveAddress,
   saveOrder,
   getOrder,
+  remove,
 } = require("../controllers/user");
 
 /* ==================== USER (เดิม) ==================== */
@@ -22,7 +23,7 @@ router.post("/user/change-role", authCheck, changeRole);     // เปลี่�
 /* ==================== USER (เพิ่ม alias แบบ /admin/*) ==================== */
 /* ถ้ามี adminCheck ให้เปิดใช้งานแทนคอมเมนต์ไว้จะดีกว่า */
 router.get("/admin/users", authCheck /*, adminCheck*/, listUsers);
-
+router.delete("/admin/users/:id", authCheck, adminCheck, remove);
 // toggle enable ผ่าน /admin
 router.patch("/admin/users/:id/toggle-enable", authCheck /*, adminCheck*/, (req, res) => {
   req.body = {
