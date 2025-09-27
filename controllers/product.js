@@ -119,6 +119,44 @@ exports.update = async (req, res) => {
   }
 };
 
+// controllers/product.js
+// helper: นับจำนวนออเดอร์ที่มีสินค้านี้ (พยายามให้ครอบคลุมทุกเคส)
+async function countProductUsedInOrders(id) {
+  // 1) ผ่าน relation ปกติของ Prisma
+  try {
+    const c1 = await prisma.productOnOrder.count({ where: { productId: id } });
+    if (c1 > 0) return c1;
+  } catch {}
+
+  // 2) Raw (Postgres) — "ProductOnOrder"
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT COUNT(*)::int AS c FROM "ProductOnOrder" WHERE "productId" = ${id}
+    `;
+    const c = Number(rows?.[0]?.c || 0);
+    if (c > 0) return c;
+  } catch {}
+
+  // 3) Raw (MySQL) — ProductOnOrder
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT COUNT(*) AS c FROM ProductOnOrder WHERE productId = ${id}
+    `;
+    const c = Number(rows?.[0]?.c || 0);
+    if (c > 0) return c;
+  } catch {}
+
+  // 4) กันพลาดด้วยการไล่นับผ่าน Order->products (ถ้า schema รองรับ)
+  try {
+    const c4 = await prisma.order.count({
+      where: { products: { some: { productId: id } } },
+    });
+    return c4 || 0;
+  } catch {}
+
+  return 0;
+}
+
 exports.remove = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -126,19 +164,15 @@ exports.remove = async (req, res) => {
       return res.status(400).json({ ok: false, message: "id ไม่ถูกต้อง" });
     }
 
-    // ❗ กันลบถ้ายังมีอยู่ในออเดอร์
-    const [usedJoin, usedViaOrder] = await Promise.all([
-      prisma.productOnOrder.count({ where: { productId: id } }),
-      prisma.order.count({ where: { products: { some: { productId: id } } } }),
-    ]);
-
-    if (usedJoin > 0 || usedViaOrder > 0) {
+    const usedCount = await countProductUsedInOrders(id);
+    if (usedCount > 0) {
       return res.status(409).json({
         ok: false,
-        message: "ลบสินค้าไม่ได้ เนื่องจากสินค้านี้มีอยู่ในคำสั่งซื้อ",
+        code: "PRODUCT_IN_ORDERS",
+        message: `ลบสินค้าไม่ได้ เนื่องจากสินค้านี้มีอยู่ในคำสั่งซื้อ ${usedCount} รายการ`,
+        count: usedCount,
       });
     }
-
 
     await prisma.product.delete({ where: { id } });
     return res.json({ ok: true });
@@ -150,6 +184,7 @@ exports.remove = async (req, res) => {
     return res.status(500).json({ ok: false, message: "ลบสินค้าไม่สำเร็จ" });
   }
 };
+
 
 
 
