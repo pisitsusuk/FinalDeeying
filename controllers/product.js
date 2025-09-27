@@ -217,7 +217,7 @@ exports.remove = async (req, res) => {
       return res.status(409).json({
         ok: false,
         code: "PRODUCT_IN_ORDERS",
-        message: `ลบสินค้าไม่ได้ เนื่องจากสินค้านี้มีอยู่ในคำสั่งซื้อ ${usedCount} รายการ`,
+        message: `ลบสินค้าไม่ได้ เนื่องจากยังมีสินค้านี้อยู่ในคำสั่งซื้อ `,
         count: usedCount,
       });
     }
