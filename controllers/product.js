@@ -127,13 +127,18 @@ exports.remove = async (req, res) => {
     }
 
     // ❗ กันลบถ้ายังมีอยู่ในออเดอร์
-    const used = await prisma.productOnOrder.count({ where: { productId: id } });
-    if (used > 0) {
+    const [usedJoin, usedViaOrder] = await Promise.all([
+      prisma.productOnOrder.count({ where: { productId: id } }),
+      prisma.order.count({ where: { products: { some: { productId: id } } } }),
+    ]);
+
+    if (usedJoin > 0 || usedViaOrder > 0) {
       return res.status(409).json({
         ok: false,
         message: "ลบสินค้าไม่ได้ เนื่องจากสินค้านี้มีอยู่ในคำสั่งซื้อ",
       });
     }
+
 
     await prisma.product.delete({ where: { id } });
     return res.json({ ok: true });
