@@ -5,6 +5,9 @@ const router = express.Router();
 // ✅ ใช้ไฟล์ middleware เดิม
 const { authCheck, adminCheck } = require("../middlewares/auth");
 
+// ✅ ใช้ remove จาก controllers/user (มี guard)
+const { remove: removeUser } = require("../controllers/user");
+
 // ✅ ดึงทุกฟังก์ชันที่ต้องใช้ รวมถึง listSlips
 const {
   changeOrderStatus,
@@ -15,7 +18,6 @@ const {
   getBankInfo,
   updateBankInfo,
   listSlips,
-  deleteUser,           // <-- เพิ่มอันนี้
 } = require("../controllers/admin");
 
 /* ===== Orders ===== */
@@ -26,7 +28,7 @@ router.get("/admin/orders", authCheck, adminCheck, getOrderAdmin);
 router.get("/admin/users", authCheck, adminCheck, listUsers);
 router.patch("/admin/users/:id/role", authCheck, adminCheck, setRole);
 router.patch("/admin/users/:id/enabled", authCheck, adminCheck, setEnabled);
-router.delete("/admin/users/:id", authCheck, adminCheck, deleteUser); // <-- เพิ่มบรรทัดนี้
+router.delete("/admin/users/:id", authCheck, adminCheck, removeUser); // <-- เพิ่มบรรทัดนี้
 /* ===== Bank Info ===== */
 router.get("/admin/bank-info", authCheck, adminCheck, getBankInfo);
 router.put("/admin/bank-info", authCheck, adminCheck, updateBankInfo);
