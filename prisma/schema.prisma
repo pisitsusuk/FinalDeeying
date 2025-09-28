@@ -1,17 +1,10 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  // provider = "mysql"
   provider  = "postgresql"
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -24,10 +17,10 @@ model User {
   role      String   @default("user")
   enabled   Boolean  @default(true)
   address   String?
-  orders    Order[]
-  carts     Cart[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  carts     Cart[]
+  orders    Order[]
 }
 
 model Product {
@@ -37,87 +30,79 @@ model Product {
   price       Float
   sold        Int              @default(0)
   quantity    Int
-  orderItems  ProductOnOrder[]
-  cartItems   ProductOnCart[]
-  images      Image[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
-  category    Category?        @relation(fields: [categoryId], references: [id])
   categoryId  Int?
   deleted     Boolean          @default(false)
-}
-
-enum OrderStatus {
-  Not_Process
-  Pending
-  Processing
-  Completed
-  Cancelled
+  images      Image[]
+  category    Category?        @relation(fields: [categoryId], references: [id])
+  cartItems   ProductOnCart[]
+  orderItems  ProductOnOrder[]
 }
 
 model Order {
   id              Int              @id @default(autoincrement())
-  products        ProductOnOrder[]
   cartTotal       Float
   orderStatus     OrderStatus      @default(Not_Process)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
-  orderedBy       User             @relation(fields: [orderedById], references: [id])
   orderedById     Int
   stripePaymentId String
   amount          Int
   status          String
   currentcy       String
+  orderedBy       User             @relation(fields: [orderedById], references: [id])
+  products        ProductOnOrder[]
 }
 
 model ProductOnOrder {
   id        Int     @id @default(autoincrement())
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId Int
-  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderId   Int
   count     Int
   price     Float
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model Category {
   id        Int       @id @default(autoincrement())
   name      String
-  products  Product[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  products  Product[]
 }
 
 model Cart {
   id          Int             @id @default(autoincrement())
-  products    ProductOnCart[]
   cartTotal   Float
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
-  orderedBy   User            @relation(fields: [orderedById], references: [id])
   orderedById Int
+  orderedBy   User            @relation(fields: [orderedById], references: [id])
+  products    ProductOnCart[]
   cartAddress CartAddress?
 }
 
 model CartAddress {
   id        Int      @id @default(autoincrement())
-  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  cartId    Int      @unique // 1 cart = 1 address
+  cartId    Int      @unique
   address   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
 
-  @@map("cart_addresses") // ให้ตรงกับชื่อ table ใน DB
+  @@map("cart_addresses")
 }
 
 model ProductOnCart {
   id        Int     @id @default(autoincrement())
-  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
   cartId    Int
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId Int
   count     Int
   price     Float
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model Image {
@@ -128,29 +113,22 @@ model Image {
   secure_url String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId  Int
-}
-
-enum PaymentSlipStatus {
-  PENDING
-  APPROVED
-  REJECTED
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model PaymentSlip {
-  id         Int               @id @default(autoincrement())
-  cart_id    Int
-  user_id    Int?
-  amount     Decimal           @db.Decimal(10, 2)
-  slip_path  String            @db.VarChar(255)
-  shipping_address String?          @db.VarChar(500)
-  status     PaymentSlipStatus @default(PENDING)
-  created_at DateTime?         @default(now())
-  updated_at DateTime?         @updatedAt
-  
-  stock_deducted Boolean       @default(false)
-  
+  id               Int               @id @default(autoincrement())
+  cart_id          Int
+  user_id          Int?
+  amount           Decimal           @db.Decimal(10, 2)
+  slip_path        String            @db.VarChar(255)
+  shipping_address String?           @db.VarChar(500)
+  status           PaymentSlipStatus @default(PENDING)
+  created_at       DateTime?         @default(now())
+  updated_at       DateTime?         @updatedAt
+  stock_deducted   Boolean           @default(false)
+
   @@map("payment_slips")
 }
 
@@ -159,8 +137,8 @@ model BankInfo {
   bankName      String
   accountNumber String
   accountName   String
-  qrCodeImage   String? // เก็บ URL ของ QR code
-  bankLogo      String? // เก็บ URL ของรูปธนาคาร
+  qrCodeImage   String?
+  bankLogo      String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -173,5 +151,20 @@ model PaymentSlipItem {
   price      Decimal  @db.Decimal(10, 2)
   qty        Int
   created_at DateTime @default(now())
+
   @@map("payment_slip_items")
+}
+
+enum OrderStatus {
+  Not_Process
+  Pending
+  Processing
+  Completed
+  Cancelled
+}
+
+enum PaymentSlipStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
