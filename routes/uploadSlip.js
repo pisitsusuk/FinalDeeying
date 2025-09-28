@@ -5,10 +5,18 @@ const path = require("path");
 const fs = require("fs");
 const router = express.Router();
 const { authCheck } = require("../middlewares/auth");
+const cloudinary = require("cloudinary").v2;
 
-// === โฟลเดอร์เก็บสลิป ===
-const SLIP_DIR = path.join(__dirname, "..", "uploads", "slips");
-fs.mkdirSync(SLIP_DIR, { recursive: true });
+// === Cloudinary Configuration ===
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// === โฟลเดอร์เก็บสลิปชั่วคราว (สำหรับ temp upload ก่อนส่งไป Cloudinary) ===
+const TEMP_DIR = path.join(__dirname, "..", "temp");
+fs.mkdirSync(TEMP_DIR, { recursive: true });
 
 // กัน content-type ผิด
 router.use("/payments/slip", (req, res, next) => {
@@ -23,9 +31,9 @@ router.use("/payments/slip", (req, res, next) => {
   next();
 });
 
-// === Multer ===
+// === Multer สำหรับ temp storage ===
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, SLIP_DIR),
+  destination: (_req, _file, cb) => cb(null, TEMP_DIR),
   filename: (_req, file, cb) => {
     const ext = (path.extname(file.originalname || "") || "").toLowerCase();
     const safeBase = (path.basename(file.originalname || "", ext) || "slip")
@@ -209,7 +217,8 @@ async function snapshotCartToOrder(tx, { userId, cartId, amount }) {
 // POST /api/payments/slip  (form-data: cart_id, amount, slip|file[, shipping_address])
 router.post("/payments/slip", authCheck, acceptSlip, async (req, res) => {
   const db = req.db;
-  let savedFileAbsPath = null;
+  let tempFilePath = null;
+  let cloudinaryResult = null;
 
   const tx = await beginTx(db);
   try {
@@ -220,14 +229,28 @@ router.post("/payments/slip", authCheck, acceptSlip, async (req, res) => {
     if (!files.length) return res.status(400).json({ ok: false, message: "กรุณาแนบไฟล์สลิป" });
 
     const file = files[0];
-    savedFileAbsPath = file.path;
+    tempFilePath = file.path;
 
     const cartId = Number(String(cart_id || "").trim());
     const amt = Number(String(amount || "").trim());
     if (!Number.isFinite(cartId)) return res.status(400).json({ ok: false, message: "cart_id ไม่ถูกต้อง" });
     if (!Number.isFinite(amt) || amt <= 0) return res.status(400).json({ ok: false, message: "amount ไม่ถูกต้อง" });
 
-    const slipPath = `/uploads/slips/${file.filename}`;
+    // อัพโหลดไปยัง Cloudinary
+    try {
+      cloudinaryResult = await cloudinary.uploader.upload(tempFilePath, {
+        folder: "payment_slips",
+        resource_type: "auto",
+        public_id: `slip_${cartId}_${userId}_${Date.now()}`,
+        quality: "auto:good",
+        fetch_format: "auto"
+      });
+    } catch (cloudErr) {
+      console.error("Cloudinary upload error:", cloudErr);
+      return res.status(500).json({ ok: false, message: "อัพโหลดภาพล้มเหลว" });
+    }
+
+    const slipPath = cloudinaryResult.secure_url;
 
     // ดึง address จาก cart_addresses ถ้าไม่ได้ส่งมา
     let resolvedAddress = (shipping_address || "").trim() || null;
@@ -325,17 +348,34 @@ router.post("/payments/slip", authCheck, acceptSlip, async (req, res) => {
     const orderId = await snapshotCartToOrder(tx, { userId, cartId, amount: amt });
 
     await tx.commit();
+
+    // ลบไฟล์ temp หลังบันทึกสำเร็จ
+    if (tempFilePath) {
+      fs.promises.unlink(tempFilePath).catch(() => {});
+    }
+
     return res.json({
       ok: true,
       message: "อัปโหลดสลิปสำเร็จ รอตรวจสอบ",
       order_id: orderId,
       slip_id: slipId,
       slip_path: slipPath,
+      cloudinary_public_id: cloudinaryResult?.public_id,
       shipping_address: resolvedAddress,
     });
   } catch (err) {
     try { await tx.rollback(); } catch {}
-    if (savedFileAbsPath) fs.promises.unlink(savedFileAbsPath).catch(() => {});
+
+    // ลบไฟล์ temp หากเกิดข้อผิดพลาด
+    if (tempFilePath) {
+      fs.promises.unlink(tempFilePath).catch(() => {});
+    }
+
+    // ลบจาก Cloudinary หากอัพโหลดสำเร็จแล้วแต่เกิดข้อผิดพลาดตอนบันทึกฐานข้อมูล
+    if (cloudinaryResult?.public_id) {
+      cloudinary.uploader.destroy(cloudinaryResult.public_id).catch(console.error);
+    }
+
     console.error("upload slip error:", err?.message || err);
     return res.status(500).json({ ok: false, message: err?.message || "อัปโหลดล้มเหลว" });
   } finally {
