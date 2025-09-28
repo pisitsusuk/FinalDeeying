@@ -3,16 +3,24 @@ const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
 const BankInfoController = require("../controllers/BankInfoController");
+const cloudinary = require("cloudinary").v2;
 
 const router = express.Router();
 
-// === โฟลเดอร์เก็บไฟล์ธนาคาร ===
-const BANK_DIR = path.join(__dirname, "..", "uploads", "banks");
-fs.mkdirSync(BANK_DIR, { recursive: true });
+// === Cloudinary Configuration ===
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// === โฟลเดอร์เก็บไฟล์ธนาคารชั่วคราว ===
+const TEMP_DIR = path.join(__dirname, "..", "temp");
+fs.mkdirSync(TEMP_DIR, { recursive: true });
 
 // === Multer Config ===
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, BANK_DIR),
+  destination: (_req, _file, cb) => cb(null, TEMP_DIR),
   filename: (_req, file, cb) => {
     const ext = (path.extname(file.originalname || "") || "").toLowerCase();
     const safeBase = (path.basename(file.originalname || "", ext) || "file")
@@ -61,6 +69,43 @@ router.post(
     { name: "qrCodeImage", maxCount: 1 },
     { name: "bankLogo", maxCount: 1 },
   ]),
+  async (req, res, next) => {
+    // อัพโหลดไฟล์ไป Cloudinary
+    try {
+      if (req.files?.qrCodeImage?.[0]) {
+        const qrResult = await cloudinary.uploader.upload(req.files.qrCodeImage[0].path, {
+          folder: "bank_info",
+          resource_type: "image",
+          public_id: `qr_${Date.now()}`,
+          quality: "auto:good",
+          fetch_format: "auto"
+        });
+        req.cloudinary = req.cloudinary || {};
+        req.cloudinary.qrCodeImage = qrResult;
+        // ลบไฟล์ temp
+        fs.promises.unlink(req.files.qrCodeImage[0].path).catch(() => {});
+      }
+
+      if (req.files?.bankLogo?.[0]) {
+        const logoResult = await cloudinary.uploader.upload(req.files.bankLogo[0].path, {
+          folder: "bank_info",
+          resource_type: "image",
+          public_id: `logo_${Date.now()}`,
+          quality: "auto:good",
+          fetch_format: "auto"
+        });
+        req.cloudinary = req.cloudinary || {};
+        req.cloudinary.bankLogo = logoResult;
+        // ลบไฟล์ temp
+        fs.promises.unlink(req.files.bankLogo[0].path).catch(() => {});
+      }
+
+      next();
+    } catch (err) {
+      console.error("Cloudinary upload error:", err);
+      return res.status(500).json({ error: "อัพโหลดไฟล์ไม่สำเร็จ" });
+    }
+  },
   BankInfoController.createBankInfo
 );
 
@@ -71,6 +116,43 @@ router.put(
     { name: "qrCodeImage", maxCount: 1 },
     { name: "bankLogo", maxCount: 1 },
   ]),
+  async (req, res, next) => {
+    // อัพโหลดไฟล์ไป Cloudinary
+    try {
+      if (req.files?.qrCodeImage?.[0]) {
+        const qrResult = await cloudinary.uploader.upload(req.files.qrCodeImage[0].path, {
+          folder: "bank_info",
+          resource_type: "image",
+          public_id: `qr_${req.params.id}_${Date.now()}`,
+          quality: "auto:good",
+          fetch_format: "auto"
+        });
+        req.cloudinary = req.cloudinary || {};
+        req.cloudinary.qrCodeImage = qrResult;
+        // ลบไฟล์ temp
+        fs.promises.unlink(req.files.qrCodeImage[0].path).catch(() => {});
+      }
+
+      if (req.files?.bankLogo?.[0]) {
+        const logoResult = await cloudinary.uploader.upload(req.files.bankLogo[0].path, {
+          folder: "bank_info",
+          resource_type: "image",
+          public_id: `logo_${req.params.id}_${Date.now()}`,
+          quality: "auto:good",
+          fetch_format: "auto"
+        });
+        req.cloudinary = req.cloudinary || {};
+        req.cloudinary.bankLogo = logoResult;
+        // ลบไฟล์ temp
+        fs.promises.unlink(req.files.bankLogo[0].path).catch(() => {});
+      }
+
+      next();
+    } catch (err) {
+      console.error("Cloudinary upload error:", err);
+      return res.status(500).json({ error: "อัพโหลดไฟล์ไม่สำเร็จ" });
+    }
+  },
   BankInfoController.updateBankInfo
 );
 
